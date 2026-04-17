@@ -15,4 +15,6 @@ class ConnectionUser:
     async def send_message(self, user_id:str, message: dict):
         if user_id in self.active_connections:
             await self.active_connections[user_id].send_json(message)
+            
+
     
