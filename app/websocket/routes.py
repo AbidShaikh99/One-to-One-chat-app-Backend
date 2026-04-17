@@ -30,7 +30,7 @@ async def websocket_chat(websocket: WebSocket, user_id: int, db: Session = Depen
         })
 
     await websocket.send_json({
-        "type": "history",
+        "status":True,
         "data": history
     })
 
@@ -83,7 +83,7 @@ async def websocket_chat(websocket: WebSocket, user_id: int, db: Session = Depen
                 })
 
             await user.send_message(receiver_id, {
-                "type": "history",
+                "status": True,
                 "data": updated_history
             })
 
