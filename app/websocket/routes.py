@@ -10,56 +10,87 @@ user = ConnectionUser()
 
 @router.websocket("/ws/{user_id}")
 async def websocket_chat(websocket: WebSocket, user_id: int, db: Session = Depends(get_db)):
-        await user.connect(user_id, websocket)
+    
+    await user.connect(user_id, websocket)
 
-        messages = db.query(models.Message).filter(
-            (models.Message.sender_id == user_id) |
-            (models.Message.receiver_id == user_id)
-        ).order_by(models.Message.timestamp).all()
+    messages = db.query(models.Message).filter(
+        (models.Message.sender_id == user_id) |
+        (models.Message.receiver_id == user_id)
+    ).order_by(models.Message.timestamp).all()
 
-        history = []
-        for msg in messages:
-            history.append({
-                "sender_name": msg.sender.name,
-                "receiver_name": msg.receiver.name,
-                "content": msg.content,
-                "timestamp": str(msg.timestamp)
-            })
-
-        await websocket.send_json({
-            "status": True,
-            "data": history
+    history = []
+    for msg in messages:
+        history.append({
+            "sender_id": msg.sender_id,
+            "receiver_id": msg.receiver_id,
+            "sender_name": msg.sender.name,
+            "receiver_name": msg.receiver.name,
+            "content": msg.content,
+            "timestamp": str(msg.timestamp)
         })
 
-        try:
-            while True:
-                data = await websocket.receive_json()
+    await websocket.send_json({
+        "type": "history",
+        "data": history
+    })
 
-                receiver_id = data["receiver_id"]
-                content = data["content"]
+    try:
+        while True:
+            data = await websocket.receive_json()
 
-                sender = db.query(models.User).filter(models.User.id == user_id).first()
-                receiver = db.query(models.User).filter(models.User.id == receiver_id).first()
+            receiver_id = data["receiver_id"]
+            content = data["content"]
 
-                message = models.Message(
-                    sender_id=user_id,
-                    receiver_id=receiver_id,
-                    content=content
+            sender = db.query(models.User).filter(models.User.id == user_id).first()
+            receiver = db.query(models.User).filter(models.User.id == receiver_id).first()
+
+            if not sender or not receiver:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Invalid sender or receiver"
+                })
+                continue
+
+            message = models.Message(
+                sender_id=user_id,
+                receiver_id=receiver_id,
+                content=content
+            )
+            db.add(message)
+            db.commit()
+            db.refresh(message)
+
+            messages = db.query(models.Message).filter(
+                (
+                    (models.Message.sender_id == user_id) &
+                    (models.Message.receiver_id == receiver_id)
+                ) |
+                (
+                    (models.Message.sender_id == receiver_id) &
+                    (models.Message.receiver_id == user_id)
                 )
-                db.add(message)
-                db.commit()
+            ).order_by(models.Message.timestamp).all()
 
-                response = {
-                    "sender_name": sender.name,
-                    "receiver_name": receiver.name,
-                    "content": content,
-                    "timestamp": str(message.timestamp)
-                }
+            updated_history = []
+            for msg in messages:
+                updated_history.append({
+                    "sender_id": msg.sender_id,
+                    "receiver_id": msg.receiver_id,
+                    "sender_name": msg.sender.name,
+                    "receiver_name": msg.receiver.name,
+                    "content": msg.content,
+                    "timestamp": str(msg.timestamp)
+                })
 
-                await user.send_message(receiver_id, response)
+            await user.send_message(receiver_id, {
+                "type": "history",
+                "data": updated_history
+            })
 
-                await user.send_message(user_id, response)
-                
+            await user.send_message(user_id, {
+                "type": "history",
+                "data": updated_history
+            })
 
-        except WebSocketDisconnect:
-            user.disconnect(user_id)
+    except WebSocketDisconnect:
+        user.disconnect(user_id)
